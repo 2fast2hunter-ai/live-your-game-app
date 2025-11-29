@@ -33,6 +33,47 @@ const db = getFirestore(app);
 // WICHTIG: Keine Token-Variable nötig für Live-Version
 const initialAuthToken = null;
 
+// --- Error Boundary Component (Fängt Abstürze ab) ---
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("App Crash:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col justify-center items-center h-screen bg-red-50 p-6 text-center font-sans">
+          <div className="bg-white p-8 rounded-2xl shadow-xl border-2 border-red-100 max-w-md">
+            <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Uups, ein Fehler!</h2>
+            <p className="text-gray-600 mb-4">Die App ist beim Laden abgestürzt. Hier ist der technische Grund:</p>
+            <div className="bg-red-100 p-3 rounded-lg text-red-800 text-xs font-mono overflow-auto text-left mb-4">
+              {this.state.error && this.state.error.toString()}
+            </div>
+            <button 
+              onClick={() => window.location.reload()} 
+              className="bg-red-600 text-white px-6 py-2 rounded-full font-bold hover:bg-red-700 transition-colors"
+            >
+              Seite neu laden
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children; 
+  }
+}
+
 // --- Konstanten ---
 const QUEST_TYPES = {
     daily: { label: 'Täglich', maxShow: 5, xpFactor: 1, goldFactor: 1, dmg: 10, lootBoxChance: 0.3 },
@@ -256,21 +297,6 @@ const ErrorDisplay = ({ message }) => (
     </div>
 );
 
-const NotificationToast = ({ notification }) => {
-    const { message, type, visible } = notification;
-    if (!visible) return null;
-    const bgColor = type === 'success' ? 'bg-green-500' : 'bg-red-500';
-    const Icon = type === 'success' ? CheckCircle : X;
-    return (
-        <div className="fixed top-4 right-4 z-50 animate-bounce">
-            <div className={`flex items-center ${bgColor} text-white text-sm font-bold px-6 py-4 rounded-xl shadow-2xl`}>
-                <Icon className="w-5 h-5 mr-3" />
-                <span>{message}</span>
-            </div>
-        </div>
-    );
-};
-
 const QuestTimer = ({ type }) => {
     const [timeLeft, setTimeLeft] = useState('');
     useEffect(() => {
@@ -323,32 +349,39 @@ const Sidebar = ({ currentView, setCurrentView, userId }) => {
     );
 };
 
-const Header = ({ stats, levelStats, inventory }) => (
-    <header className="bg-white shadow-sm p-4 flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0 sticky top-0 z-10 border-b border-gray-100">
-        <h1 className="text-xl font-bold text-gray-800 flex items-center">
-            <span className="mr-3 text-3xl bg-gray-100 rounded-full p-1 border border-gray-200">{stats.avatar || '👤'}</span> 
-            <span>Hallo, {stats.displayName || 'Held'}!</span>
-        </h1>
-        <div className="flex flex-wrap justify-center items-center gap-4">
-            <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 px-3 py-1.5 rounded-full border border-gray-200">
-                <Backpack className="w-4 h-4 text-indigo-500" />
-                <span className="font-medium">{inventory.length} Items</span>
+const Header = ({ stats, levelStats, inventory }) => {
+    // Safely access props with defaults to prevent crashes during render if data is pending
+    const safeStats = stats || { avatar: '👤', displayName: 'Held', lootBoxes: 0, level: 1, xp: 0, gold: 0 };
+    const safeInventory = inventory || [];
+    const safeLevelStats = levelStats || { progressPercentage: 0, xpToNextLevel: 100 };
+
+    return (
+        <header className="bg-white shadow-sm p-4 flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0 sticky top-0 z-10 border-b border-gray-100">
+            <h1 className="text-xl font-bold text-gray-800 flex items-center">
+                <span className="mr-3 text-3xl bg-gray-100 rounded-full p-1 border border-gray-200">{safeStats.avatar}</span> 
+                <span>Hallo, {safeStats.displayName}!</span>
+            </h1>
+            <div className="flex flex-wrap justify-center items-center gap-4">
+                <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 px-3 py-1.5 rounded-full border border-gray-200">
+                    <Backpack className="w-4 h-4 text-indigo-500" />
+                    <span className="font-medium">{safeInventory.length} Items</span>
+                </div>
+                <div className="flex items-center bg-amber-50 px-3 py-1.5 rounded-full border border-amber-200 shadow-sm" title="Lootboxen">
+                    <Box className="w-4 h-4 mr-2 text-amber-600 animate-pulse" />
+                    <span className="text-amber-900 font-bold">{safeStats.lootBoxes} Boxen</span>
+                </div>
+                <div className="flex items-center bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 shadow-sm">
+                    <TrendingUp className="w-4 h-4 mr-2 text-indigo-600" />
+                    <span className="text-indigo-900 font-bold">Lvl {safeStats.level}</span>
+                </div>
+                <div className="flex flex-col items-end gap-1 min-w-[120px]">
+                    <div className="flex justify-between w-full text-xs text-gray-500 font-medium px-1"><span>{safeStats.xp} XP</span><span>Next: {safeLevelStats.xpToNextLevel + safeStats.xp}</span></div>
+                    <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden border border-gray-300 shadow-inner"><div className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full transition-all duration-700 ease-out" style={{ width: `${safeLevelStats.progressPercentage}%` }}></div></div>
+                </div>
             </div>
-            <div className="flex items-center bg-amber-50 px-3 py-1.5 rounded-full border border-amber-200 shadow-sm" title="Lootboxen">
-                <Box className="w-4 h-4 mr-2 text-amber-600 animate-pulse" />
-                <span className="text-amber-900 font-bold">{stats.lootBoxes || 0} Boxen</span>
-            </div>
-            <div className="flex items-center bg-indigo-50 px-3 py-1.5 rounded-full border border-indigo-100 shadow-sm">
-                <TrendingUp className="w-4 h-4 mr-2 text-indigo-600" />
-                <span className="text-indigo-900 font-bold">Lvl {stats.level}</span>
-            </div>
-            <div className="flex flex-col items-end gap-1 min-w-[120px]">
-                <div className="flex justify-between w-full text-xs text-gray-500 font-medium px-1"><span>{stats.xp} XP</span><span>Next: {levelStats.xpToNextLevel + stats.xp}</span></div>
-                <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden border border-gray-300 shadow-inner"><div className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full transition-all duration-700 ease-out" style={{ width: `${levelStats.progressPercentage}%` }}></div></div>
-            </div>
-        </div>
-    </header>
-);
+        </header>
+    );
+};
 
 const ProfileView = ({ db, userId, stats, showNotification }) => {
     const [name, setName] = useState(stats.displayName || '');
@@ -587,20 +620,54 @@ const TasksView = ({ db, userId, stats, activeQuests, completeTask, claimAchieve
     );
 };
 
+const NutritionView = ({ db, userId, stats, logNutrition, showNotification }) => {
+    const [caloriesInput, setCaloriesInput] = useState('');
+    const [descriptionInput, setDescriptionInput] = useState('');
+    const today = new Date().toISOString().slice(0, 10);
+    const hasLoggedToday = stats.lastNutritionDate === today;
+
+    const handleLog = () => {
+        const cal = parseInt(caloriesInput, 10);
+        if (!db || !userId || isNaN(cal) || cal <= 0) { showNotification('Ungültige Eingabe', 'error'); return; }
+        logNutrition(cal, descriptionInput);
+        setCaloriesInput(''); setDescriptionInput('');
+    };
+
+    return (
+        <div className="p-6 max-w-2xl mx-auto space-y-8">
+            <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-8 rounded-3xl text-center shadow-inner border border-orange-200">
+                <div className="flex justify-center items-center mb-2"><Flame className={`w-8 h-8 mr-2 ${stats.nutritionStreak > 1 ? 'text-orange-600 animate-pulse' : 'text-gray-400'}`} /><span className="text-2xl font-bold text-gray-800">{stats.nutritionStreak || 0} Tage Streak</span></div>
+                <h3 className="text-gray-800 font-medium mb-1">Heute getrackt</h3>
+                <p className="text-5xl font-black text-orange-600 tracking-tight">{stats.todayCalories || 0} <span className="text-lg text-orange-400 font-medium">kcal</span></p>
+                {hasLoggedToday && <div className="mt-4 inline-flex items-center px-3 py-1 bg-white rounded-full text-xs font-bold text-green-600 shadow-sm"><CheckCircle className="w-3 h-3 mr-1" /> XP Bonus erhalten</div>}
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h3 className="font-bold text-gray-800 mb-4">Mahlzeit hinzufügen</h3>
+                <div className="space-y-3"><input type="number" placeholder="Kalorien (z.B. 500)" className="w-full p-3 bg-gray-50 rounded-xl border-transparent focus:bg-white focus:border-indigo-500 transition-colors outline-none" value={caloriesInput} onChange={e => setCaloriesInput(e.target.value)} /><input type="text" placeholder="Beschreibung (Optional)" className="w-full p-3 bg-gray-50 rounded-xl border-transparent focus:bg-white focus:border-indigo-500 transition-colors outline-none" value={descriptionInput} onChange={e => setDescriptionInput(e.target.value)} /><button onClick={handleLog} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-transform active:scale-95 shadow-lg shadow-indigo-200">Hinzufügen</button></div>
+            </div>
+        </div>
+    );
+};
+
 const DashboardView = ({ db, userId, stats, levelStats, activeQuests, inventory, onMoodLogged }) => {
     const dailyQuests = activeQuests.filter(q => q.type === 'daily');
     const completedDaily = dailyQuests.filter(t => t.isCompleted).length;
     const dailyProgress = dailyQuests.length > 0 ? (completedDaily / dailyQuests.length) * 100 : 0;
     
+    // Safe access to userStats properties
+    const safeStats = stats || { level: 1, gold: 0, nutritionStreak: 0, lootBoxes: 0, xp: 0 };
+    const safeLevelStats = levelStats || { xpToNextLevel: 100, progressPercentage: 0 };
+    const safeInventory = inventory || [];
+
     return (
         <div className="p-6 space-y-8 max-w-7xl mx-auto">
             <MoodWidget db={db} userId={userId} onMoodLogged={onMoodLogged} />
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {[
-                    { title: "Level", value: stats.level, icon: TrendingUp, color: 'indigo', sub: `${levelStats.xpToNextLevel} XP bis Up` },
-                    { title: "Lootboxen", value: stats.lootBoxes || 0, icon: Box, color: 'yellow', sub: 'Zum Öffnen' },
-                    { title: "Streak", value: `${stats.nutritionStreak || 0} Tage`, icon: Flame, color: 'orange', sub: 'Ernährung' },
-                    { title: "Inventar", value: `${inventory.length} Items`, icon: Backpack, color: 'blue', sub: 'Gesammelt' }
+                    { title: "Level", value: safeStats.level, icon: TrendingUp, color: 'indigo', sub: `${safeLevelStats.xpToNextLevel} XP bis Up` },
+                    { title: "Lootboxen", value: safeStats.lootBoxes, icon: Box, color: 'yellow', sub: 'Zum Öffnen' },
+                    { title: "Streak", value: `${safeStats.nutritionStreak} Tage`, icon: Flame, color: 'orange', sub: 'Ernährung' },
+                    { title: "Inventar", value: `${safeInventory.length} Items`, icon: Backpack, color: 'blue', sub: 'Gesammelt' }
                 ].map((card, i) => <div key={i} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow"><div className={`p-3 rounded-xl bg-${card.color}-50 text-${card.color}-600 mb-4 inline-block`}><card.icon className="w-6 h-6" /></div><p className="text-3xl font-bold text-gray-800 mb-1">{card.value}</p><p className="text-sm text-gray-500 font-medium">{card.sub}</p></div>)}
             </div>
             <div className="grid md:grid-cols-2 gap-6">
@@ -611,7 +678,7 @@ const DashboardView = ({ db, userId, stats, levelStats, activeQuests, inventory,
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                     <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center"><Sparkles className="w-5 h-5 mr-2 text-yellow-500" /> Neueste Legendäre Items</h3>
-                    {inventory.filter(i => i.rarity === 'legendary' || i.rarity === 'divine').length > 0 ? <div className="grid grid-cols-4 gap-2">{inventory.filter(i => i.rarity === 'legendary' || i.rarity === 'divine').slice(-4).reverse().map((item, idx) => <div key={idx} className={`aspect-square flex items-center justify-center text-2xl bg-gray-50 rounded-xl border-2 ${item.rarity === 'legendary' ? 'border-yellow-400 bg-yellow-50 shadow-yellow-100' : 'border-sky-300 bg-sky-50'}`} title={item.name}>{item.icon}</div>)}</div> : <p className="text-gray-400 text-sm italic">Noch keine legendären Funde.</p>}
+                    {safeInventory.filter(i => i.rarity === 'legendary' || i.rarity === 'divine').length > 0 ? <div className="grid grid-cols-4 gap-2">{safeInventory.filter(i => i.rarity === 'legendary' || i.rarity === 'divine').slice(-4).reverse().map((item, idx) => <div key={idx} className={`aspect-square flex items-center justify-center text-2xl bg-gray-50 rounded-xl border-2 ${item.rarity === 'legendary' ? 'border-yellow-400 bg-yellow-50 shadow-yellow-100' : 'border-sky-300 bg-sky-50'}`} title={item.name}>{item.icon}</div>)}</div> : <p className="text-gray-400 text-sm italic">Noch keine legendären Funde.</p>}
                 </div>
             </div>
         </div>
@@ -660,7 +727,6 @@ function App() {
         
         const handleError = (e) => {
             console.error("Firestore Error:", e);
-            // Ignore permission errors during initial load/setup
             if (e.code === 'permission-denied') return;
             setError("Datenbankverbindung fehlgeschlagen. Bitte prüfe deine Internetverbindung.");
             setLoading(false);
@@ -808,8 +874,10 @@ function App() {
         <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row font-sans text-gray-800">
             <Sidebar currentView={currentView} setCurrentView={setCurrentView} userId={currentUserId} />
             <div className="flex-1 flex flex-col overflow-hidden relative">
-                <Header stats={userStats} levelStats={levelStats} inventory={inventory} />
-                <main className="flex-1 overflow-y-auto bg-gray-50 scroll-smooth">{Content}</main>
+                <ErrorBoundary>
+                    <Header stats={userStats} levelStats={levelStats} inventory={inventory} />
+                    <main className="flex-1 overflow-y-auto bg-gray-50 scroll-smooth">{Content}</main>
+                </ErrorBoundary>
             </div>
             <NotificationToast notification={notification} />
         </div>
