@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, linkWithCredential } from 'firebase/auth';
 import { 
   getFirestore, doc, setDoc, onSnapshot, collection, 
   Timestamp, increment, deleteDoc, runTransaction, 
@@ -11,7 +11,7 @@ import {
   Utensils, X, BarChart, Layers, Zap, 
   Hourglass, Lock, Flame, ShoppingBag, Gift, Sword, 
   Skull, Ghost, Sparkles, User, Save, Backpack, Box,
-  Frown, Meh, Smile, Star, AlertTriangle, Clock 
+  Frown, Meh, Smile, Star, AlertTriangle, Clock, LogIn
 } from 'lucide-react';
 
 // --- DEINE FIREBASE KONFIGURATION ---
@@ -29,6 +29,9 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// WICHTIG: Keine Token-Variable nötig für Live-Version
+const initialAuthToken = null;
 
 // --- Error Boundary Component (Fängt Abstürze ab) ---
 class ErrorBoundary extends React.Component {
@@ -269,7 +272,7 @@ const generateLootItem = () => {
     return { ...item, obtainedAt: Date.now() }; 
 };
 
-// --- Firestore Helper ---
+// --- Firestore Pfade (Einfach) ---
 const getUserStatsDocRef = (db, userId) => doc(db, 'users', userId, 'stats', 'user_stats');
 const getTasksCollectionRef = (db, userId) => collection(db, 'users', userId, 'tasks');
 const getSelectionsDocRef = (db, userId) => doc(db, 'users', userId, 'sys', 'quest_selections');
@@ -401,14 +404,74 @@ const ProfileView = ({ db, userId, stats, showNotification }) => {
     const [avatar, setAvatar] = useState(stats.avatar || '👤');
     const availableAvatars = stats.unlockedAvatars || ['👤'];
 
+    const isAnonymous = auth.currentUser?.isAnonymous;
+    const isGoogleLinked = auth.currentUser?.providerData?.some(p => p.providerId === GoogleAuthProvider.PROVIDER_ID);
+
     const saveProfile = async () => {
         try { await updateDoc(getUserStatsDocRef(db, userId), { displayName: name, title: title, bio: bio, avatar: avatar }); showNotification('Profil gespeichert!', 'success'); } 
         catch (e) { showNotification('Fehler beim Speichern.', 'error'); }
     };
+    
+    const handleGoogleLinkOrLogin = async () => {
+        const provider = new GoogleAuthProvider();
+        try {
+            if (isAnonymous) {
+                const result = await signInWithPopup(auth, provider);
+                await linkWithCredential(auth.currentUser, result.credential);
+                showNotification('Account erfolgreich verknüpft!', 'success');
+            } else {
+                showNotification('Dein Konto ist bereits gesichert.', 'error');
+            }
+        } catch (error) {
+            console.error("Google Linking Error:", error);
+            let message = "Verknüpfung fehlgeschlagen.";
+            if (error.code === 'auth/credential-already-in-use') {
+                message = "Dieses Google-Konto ist bereits mit einem anderen Spielstand verknüpft.";
+            } else if (error.code === 'auth/popup-closed-by-user') {
+                message = "Anmeldung abgebrochen.";
+            }
+            showNotification(message, 'error');
+        }
+    };
+    
+    const handleLogout = async () => {
+        try {
+            await auth.signOut();
+            await signInAnonymously(auth); 
+            showNotification('Erfolgreich abgemeldet. Neuer anonymer Spielstand.', 'success');
+        } catch (error) {
+            console.error("Logout Error:", error);
+            showNotification('Fehler beim Abmelden.', 'error');
+        }
+    };
+
 
     return (
         <div className="p-6 max-w-2xl mx-auto space-y-8">
             <h2 className="text-3xl font-extrabold text-gray-800 flex items-center"><User className="w-8 h-8 mr-3 text-indigo-600" /> Dein Profil</h2>
+            
+            {/* Account Status Widget */}
+            <div className={`p-4 rounded-xl border-2 ${isAnonymous ? 'border-amber-300 bg-amber-50' : 'border-green-300 bg-green-50'} shadow-md`}>
+                <h4 className="font-bold mb-2 flex items-center">
+                    <span className={`w-3 h-3 rounded-full mr-2 ${isAnonymous ? 'bg-amber-500' : 'bg-green-500'}`}></span>
+                    Kontostatus
+                </h4>
+                <p className="text-sm text-gray-700">
+                    {isAnonymous 
+                        ? `Du spielst als anonymer Held. Dein Spielstand ist nur auf diesem Gerät gesichert. Verknüpfe ihn, um ihn dauerhaft zu speichern!`
+                        : `Dein Konto ist gesichert und synchronisiert.`}
+                </p>
+                {isAnonymous && (
+                    <button 
+                        onClick={handleGoogleLinkOrLogin}
+                        className="mt-3 w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center justify-center transition-transform active:scale-95"
+                    >
+                        <LogIn className="w-5 h-5 mr-2" />
+                        Mit Google verknüpfen
+                    </button>
+                )}
+            </div>
+
             <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
                 <div className="flex flex-col items-center mb-8">
                     <div className="w-24 h-24 bg-gray-50 rounded-full flex items-center justify-center text-6xl mb-6 border-4 border-indigo-100 shadow-lg">{avatar}</div>
@@ -631,15 +694,12 @@ const TasksView = ({ db, userId, stats, activeQuests, completeTask, claimAchieve
     );
 };
 
-// --- Definition der NutritionView Komponente ---
 const NutritionView = ({ db, userId, stats, logNutrition, showNotification }) => {
     const [caloriesInput, setCaloriesInput] = useState('');
     const [descriptionInput, setDescriptionInput] = useState('');
     const today = new Date().toISOString().slice(0, 10);
-    // Sicherer Zugriff auf lastNutritionDate
     const hasLoggedToday = stats && stats.lastNutritionDate === today;
     
-    // Sichere Standardwerte für stats
     const safeStats = stats || { nutritionStreak: 0, todayCalories: 0 };
 
     const handleLog = () => {
@@ -651,6 +711,7 @@ const NutritionView = ({ db, userId, stats, logNutrition, showNotification }) =>
 
     return (
         <div className="p-6 max-w-2xl mx-auto space-y-8">
+            <h2 className="text-3xl font-extrabold text-gray-800 flex items-center"><Utensils className="w-8 h-8 mr-3 text-green-600" /> Ernährung & Kalorien</h2>
             <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-8 rounded-3xl text-center shadow-inner border border-orange-200">
                 <div className="flex justify-center items-center mb-2"><Flame className={`w-8 h-8 mr-2 ${safeStats.nutritionStreak > 1 ? 'text-orange-600 animate-pulse' : 'text-gray-400'}`} /><span className="text-2xl font-bold text-gray-800">{safeStats.nutritionStreak || 0} Tage Streak</span></div>
                 <h3 className="text-gray-800 font-medium mb-1">Heute getrackt</h3>
@@ -760,10 +821,7 @@ const DashboardView = ({ db, userId, stats, levelStats, activeQuests, inventory,
     );
 };
 
-// --- APP CONTAINER ---
-// Diese Komponente enthält die gesamte Logik der App, die zuvor in "App" war.
-// Sie wird unten von der neuen "App"-Wrapper-Komponente verwendet.
-function LifeGamifierContent() {
+const LifeGamifierContent = () => {
     const [authReady, setAuthReady] = useState(false);
     const [currentUserId, setCurrentUserId] = useState(null);
     const [dbInstance, setDbInstance] = useState(null);
@@ -782,7 +840,6 @@ function LifeGamifierContent() {
 
     useEffect(() => {
         if (!firebaseConfig.apiKey) { setLoading(false); return; }
-        // Wir nutzen die globale `app`, `auth`, `db` Instanzen, die oben definiert sind
         setDbInstance(db);
         const initAuth = async () => { 
             try { 
@@ -802,9 +859,11 @@ function LifeGamifierContent() {
         
         const handleError = (e) => {
             console.error("Firestore Error:", e);
-            if (e.code === 'permission-denied') return;
-            // setError("Datenbankverbindung fehlgeschlagen. Bitte prüfe deine Internetverbindung.");
-            // Kein Blocking Error setzen, da manche Listener vllt. funktionieren
+            if (e.code === 'permission-denied') {
+                setError("FEHLER: Datenbankberechtigung fehlt. Prüfe deine Firestore-Regeln.");
+            } else {
+                 setError("Datenbankverbindung fehlgeschlagen.");
+            }
             setLoading(false);
         };
 
@@ -856,25 +915,19 @@ function LifeGamifierContent() {
 
     const activeQuests = useMemo(() => {
         const resolve = (ids, list, type) => {
-            // Sicherheitscheck: Falls ids undefined ist, leeres Array zurückgeben
             if (!ids) return [];
             return ids.map(id => {
                 const def = list.find(q => q.id === id); if (!def) return null;
                 const status = recurringCompletionMap[id];
                 const last = status?.lastCompleted;
                 let isComp = false;
-                // Sicherheitscheck für questSelections
                 if (type === 'daily' && questSelections.daily?.date) isComp = last && last.startsWith(questSelections.daily.date);
                 else if (type === 'weekly') isComp = isCompletedThisWeek(last);
                 else if (type === 'monthly') isComp = isCompletedThisMonth(last);
                 return { ...def, type, isCompleted: isComp, completionDocId: status?.id, xpReward: getRewards(type, def.difficulty).xp };
             }).filter(Boolean);
         };
-        return [
-            ...resolve(questSelections.daily?.ids || [], PREDEFINED_DAILY_QUESTS, 'daily'), 
-            ...resolve(questSelections.weekly?.ids || [], PREDEFINED_WEEKLY_QUESTS, 'weekly'), 
-            ...resolve(questSelections.monthly?.ids || [], PREDEFINED_MONTHLY_QUESTS, 'monthly')
-        ];
+        return [...resolve(questSelections.daily?.ids || [], PREDEFINED_DAILY_QUESTS, 'daily'), ...resolve(questSelections.weekly?.ids || [], PREDEFINED_WEEKLY_QUESTS, 'weekly'), ...resolve(questSelections.monthly?.ids || [], PREDEFINED_MONTHLY_QUESTS, 'monthly')];
     }, [questSelections, recurringCompletionMap]);
 
     const completeTask = useCallback(async (taskId, task) => {
@@ -967,7 +1020,6 @@ function LifeGamifierContent() {
 }
 
 // --- HAUPT APP WRAPPER (mit ErrorBoundary) ---
-// Diese Komponente ist der Einstiegspunkt, der sicherstellt, dass Fehler abgefangen werden
 function App() {
     return (
         <ErrorBoundary>
