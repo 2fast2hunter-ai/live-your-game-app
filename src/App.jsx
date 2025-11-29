@@ -8,10 +8,10 @@ import {
 } from 'firebase/firestore';
 import { 
   CheckCircle, Plus, Target, TrendingUp, DollarSign, 
-  Utensils, X, BarChart, Sun, Clock, Layers, Zap, 
+  Utensils, X, BarChart, Layers, Zap, 
   Hourglass, Lock, Flame, ShoppingBag, Gift, Sword, 
   Skull, Ghost, Sparkles, User, Save, Backpack, Box,
-  Frown, Meh, Smile, Star 
+  Frown, Meh, Smile, Star, AlertTriangle
 } from 'lucide-react';
 
 // --- DEINE FIREBASE KONFIGURATION ---
@@ -30,7 +30,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// WICHTIG: Diese Variable definiert, dass wir keine speziellen Tokens aus dem Chat nutzen
+// WICHTIG: Keine Token-Variable nötig für Live-Version
 const initialAuthToken = null;
 
 // --- Konstanten ---
@@ -244,6 +244,15 @@ const LoadingSpinner = () => (
     <div className="flex justify-center items-center h-full min-h-screen bg-gray-50">
         <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-indigo-500"></div>
         <p className="ml-4 text-gray-500 font-medium">Lade dein Abenteuer...</p>
+    </div>
+);
+
+const ErrorDisplay = ({ message }) => (
+    <div className="flex flex-col justify-center items-center h-full min-h-screen bg-red-50 p-6 text-center">
+        <AlertTriangle className="w-16 h-16 text-red-500 mb-4" />
+        <h2 className="text-2xl font-bold text-red-800 mb-2">Verbindungsfehler</h2>
+        <p className="text-red-600 max-w-md">{message}</p>
+        <p className="text-sm text-red-400 mt-4">Tipp: Aktiviere in der Firebase Console unter Authentication "Anonym" und in Firestore Rules "allow read, write".</p>
     </div>
 );
 
@@ -578,35 +587,6 @@ const TasksView = ({ db, userId, stats, activeQuests, completeTask, claimAchieve
     );
 };
 
-const NutritionView = ({ db, userId, stats, logNutrition, showNotification }) => {
-    const [caloriesInput, setCaloriesInput] = useState('');
-    const [descriptionInput, setDescriptionInput] = useState('');
-    const today = new Date().toISOString().slice(0, 10);
-    const hasLoggedToday = stats.lastNutritionDate === today;
-
-    const handleLog = () => {
-        const cal = parseInt(caloriesInput, 10);
-        if (!db || !userId || isNaN(cal) || cal <= 0) { showNotification('Ungültige Eingabe', 'error'); return; }
-        logNutrition(cal, descriptionInput);
-        setCaloriesInput(''); setDescriptionInput('');
-    };
-
-    return (
-        <div className="p-6 max-w-2xl mx-auto space-y-8">
-            <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-8 rounded-3xl text-center shadow-inner border border-orange-200">
-                <div className="flex justify-center items-center mb-2"><Flame className={`w-8 h-8 mr-2 ${stats.nutritionStreak > 1 ? 'text-orange-600 animate-pulse' : 'text-gray-400'}`} /><span className="text-2xl font-bold text-gray-800">{stats.nutritionStreak || 0} Tage Streak</span></div>
-                <h3 className="text-gray-800 font-medium mb-1">Heute getrackt</h3>
-                <p className="text-5xl font-black text-orange-600 tracking-tight">{stats.todayCalories || 0} <span className="text-lg text-orange-400 font-medium">kcal</span></p>
-                {hasLoggedToday && <div className="mt-4 inline-flex items-center px-3 py-1 bg-white rounded-full text-xs font-bold text-green-600 shadow-sm"><CheckCircle className="w-3 h-3 mr-1" /> XP Bonus erhalten</div>}
-            </div>
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                <h3 className="font-bold text-gray-800 mb-4">Mahlzeit hinzufügen</h3>
-                <div className="space-y-3"><input type="number" placeholder="Kalorien (z.B. 500)" className="w-full p-3 bg-gray-50 rounded-xl border-transparent focus:bg-white focus:border-indigo-500 transition-colors outline-none" value={caloriesInput} onChange={e => setCaloriesInput(e.target.value)} /><input type="text" placeholder="Beschreibung (Optional)" className="w-full p-3 bg-gray-50 rounded-xl border-transparent focus:bg-white focus:border-indigo-500 transition-colors outline-none" value={descriptionInput} onChange={e => setDescriptionInput(e.target.value)} /><button onClick={handleLog} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-transform active:scale-95 shadow-lg shadow-indigo-200">Hinzufügen</button></div>
-            </div>
-        </div>
-    );
-};
-
 const DashboardView = ({ db, userId, stats, levelStats, activeQuests, inventory, onMoodLogged }) => {
     const dailyQuests = activeQuests.filter(q => q.type === 'daily');
     const completedDaily = dailyQuests.filter(t => t.isCompleted).length;
@@ -649,6 +629,7 @@ function App() {
     const [inventory, setInventory] = useState([]);
     const [currentView, setCurrentView] = useState('dashboard');
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const [notification, setNotification] = useState({ message: '', type: '', visible: false });
     const [allBosses, setAllBosses] = useState([]);
 
@@ -661,13 +642,30 @@ function App() {
         const auth = getAuth(app);
         const db = getFirestore(app);
         setDbInstance(db);
-        const initAuth = async () => { try { if (initialAuthToken) await signInWithCustomToken(auth, initialAuthToken); else await signInAnonymously(auth); } catch(e) { console.error(e); } };
+        const initAuth = async () => { 
+            try { 
+                await signInAnonymously(auth); 
+            } catch(e) { 
+                console.error("Auth Error:", e);
+                setError(e.message);
+                setLoading(false);
+            } 
+        };
         onAuthStateChanged(auth, u => { if (u) { setCurrentUserId(u.uid); setAuthReady(true); } else initAuth(); });
     }, []);
 
     useEffect(() => {
         if (!authReady || !dbInstance || !currentUserId) return;
         const db = dbInstance; const uid = currentUserId;
+        
+        const handleError = (e) => {
+            console.error("Firestore Error:", e);
+            // Ignore permission errors during initial load/setup
+            if (e.code === 'permission-denied') return;
+            setError("Datenbankverbindung fehlgeschlagen. Bitte prüfe deine Internetverbindung.");
+            setLoading(false);
+        };
+
         const unsubStats = onSnapshot(getUserStatsDocRef(db, uid), snap => {
             if (snap.exists()) {
                 const data = snap.data();
@@ -676,15 +674,17 @@ function App() {
                 setUserStats({ ...data, ...calculateLevelProgress(data.xp || 0) });
             } else setDoc(getUserStatsDocRef(db, uid), { xp: 0, level: 1, gold: 0, lootBoxes: 0, nutritionStreak: 0, unlockedAvatars: ['👤'] }).catch(console.error);
             setLoading(false);
-        });
+        }, handleError);
+
         const unsubTasks = onSnapshot(getTasksCollectionRef(db, uid), snap => {
             const compMap = {};
             snap.docs.forEach(d => { const val = d.data(); if (val.type === 'recurring_tracking') compMap[val.predefinedId] = { id: d.id, lastCompleted: val.lastCompleted?.toDate().toISOString() }; });
             setRecurringCompletionMap(compMap);
-        });
-        const unsubSel = onSnapshot(getSelectionsDocRef(db, uid), snap => { if (snap.exists()) setQuestSelections(snap.data()); else setQuestSelections({ daily: { date: null, ids: [] }, weekly: { weekStart: null, ids: [] }, monthly: { monthStart: null, ids: [] } }); });
-        const unsubInv = onSnapshot(getInventoryCollectionRef(db, uid), snap => setInventory(snap.docs.map(d => d.data())));
-        const unsubBosses = onSnapshot(getBossesCollectionRef(db, uid), s => setAllBosses(s.docs.map(d => ({id: d.id, ...d.data()}))));
+        }, handleError);
+
+        const unsubSel = onSnapshot(getSelectionsDocRef(db, uid), snap => { if (snap.exists()) setQuestSelections(snap.data()); else setQuestSelections({ daily: { date: null, ids: [] }, weekly: { weekStart: null, ids: [] }, monthly: { monthStart: null, ids: [] } }); }, handleError);
+        const unsubInv = onSnapshot(getInventoryCollectionRef(db, uid), snap => setInventory(snap.docs.map(d => d.data())), handleError);
+        const unsubBosses = onSnapshot(getBossesCollectionRef(db, uid), s => setAllBosses(s.docs.map(d => ({id: d.id, ...d.data()}))), handleError);
         return () => { unsubStats(); unsubTasks(); unsubSel(); unsubInv(); unsubBosses(); };
     }, [authReady, dbInstance, currentUserId]);
 
@@ -793,6 +793,7 @@ function App() {
         } catch (e) { showNotification(e.message, 'error'); }
     }, [dbInstance, currentUserId, showNotification]);
 
+    if (error) return <ErrorDisplay message={error} />;
     if (loading || !authReady) return <LoadingSpinner />;
     const commonProps = { db: dbInstance, userId: currentUserId, showNotification, stats: userStats };
     let Content;
