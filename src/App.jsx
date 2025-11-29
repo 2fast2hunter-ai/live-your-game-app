@@ -11,7 +11,7 @@ import {
   Utensils, X, BarChart, Layers, Zap, 
   Hourglass, Lock, Flame, ShoppingBag, Gift, Sword, 
   Skull, Ghost, Sparkles, User, Save, Backpack, Box,
-  Frown, Meh, Smile, Star, AlertTriangle, Clock // Clock hinzugefügt
+  Frown, Meh, Smile, Star, AlertTriangle, Clock 
 } from 'lucide-react';
 
 // --- DEINE FIREBASE KONFIGURATION ---
@@ -627,6 +627,40 @@ const TasksView = ({ db, userId, stats, activeQuests, completeTask, claimAchieve
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4"><h2 className="text-2xl font-bold text-gray-800">Quest Tafel</h2>{activeTab !== 'achievements' && <div className="text-sm font-medium text-gray-500">Reset in: <QuestTimer type={activeTab} /></div>}</div>
             <div className="flex p-1 bg-gray-200 rounded-xl overflow-x-auto">{[...Object.keys(QUEST_TYPES), 'achievements'].map(type => <button key={type} onClick={() => setActiveTab(type)} className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${activeTab === type ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{type === 'achievements' ? 'Meilensteine' : QUEST_TYPES[type].label}</button>)}</div>
             {activeTab !== 'achievements' ? <div className="space-y-3">{filteredQuests.length > 0 ? filteredQuests.map(t => <TaskItem key={t.id} taskId={t.completionDocId || t.id} task={t} />) : <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-gray-300 text-gray-500">Warte auf neue Quests...</div>}</div> : <div className="grid md:grid-cols-2 gap-4">{ACHIEVEMENTS.map(ach => <AchievementItem key={ach.id} achievement={ach} />)}</div>}
+        </div>
+    );
+};
+
+// --- Definition der NutritionView Komponente ---
+const NutritionView = ({ db, userId, stats, logNutrition, showNotification }) => {
+    const [caloriesInput, setCaloriesInput] = useState('');
+    const [descriptionInput, setDescriptionInput] = useState('');
+    const today = new Date().toISOString().slice(0, 10);
+    // Sicherer Zugriff auf lastNutritionDate
+    const hasLoggedToday = stats && stats.lastNutritionDate === today;
+    
+    // Sichere Standardwerte für stats
+    const safeStats = stats || { nutritionStreak: 0, todayCalories: 0 };
+
+    const handleLog = () => {
+        const cal = parseInt(caloriesInput, 10);
+        if (!db || !userId || isNaN(cal) || cal <= 0) { showNotification('Ungültige Eingabe', 'error'); return; }
+        logNutrition(cal, descriptionInput);
+        setCaloriesInput(''); setDescriptionInput('');
+    };
+
+    return (
+        <div className="p-6 max-w-2xl mx-auto space-y-8">
+            <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-8 rounded-3xl text-center shadow-inner border border-orange-200">
+                <div className="flex justify-center items-center mb-2"><Flame className={`w-8 h-8 mr-2 ${safeStats.nutritionStreak > 1 ? 'text-orange-600 animate-pulse' : 'text-gray-400'}`} /><span className="text-2xl font-bold text-gray-800">{safeStats.nutritionStreak || 0} Tage Streak</span></div>
+                <h3 className="text-gray-800 font-medium mb-1">Heute getrackt</h3>
+                <p className="text-5xl font-black text-orange-600 tracking-tight">{safeStats.todayCalories || 0} <span className="text-lg text-orange-400 font-medium">kcal</span></p>
+                {hasLoggedToday && <div className="mt-4 inline-flex items-center px-3 py-1 bg-white rounded-full text-xs font-bold text-green-600 shadow-sm"><CheckCircle className="w-3 h-3 mr-1" /> XP Bonus erhalten</div>}
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h3 className="font-bold text-gray-800 mb-4">Mahlzeit hinzufügen</h3>
+                <div className="space-y-3"><input type="number" placeholder="Kalorien (z.B. 500)" className="w-full p-3 bg-gray-50 rounded-xl border-transparent focus:bg-white focus:border-indigo-500 transition-colors outline-none" value={caloriesInput} onChange={e => setCaloriesInput(e.target.value)} /><input type="text" placeholder="Beschreibung (Optional)" className="w-full p-3 bg-gray-50 rounded-xl border-transparent focus:bg-white focus:border-indigo-500 transition-colors outline-none" value={descriptionInput} onChange={e => setDescriptionInput(e.target.value)} /><button onClick={handleLog} className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-transform active:scale-95 shadow-lg shadow-indigo-200">Hinzufügen</button></div>
+            </div>
         </div>
     );
 };
