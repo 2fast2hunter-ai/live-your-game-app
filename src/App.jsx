@@ -30,9 +30,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// WICHTIG: Keine Token-Variable nötig für Live-Version
-const initialAuthToken = null;
-
 // --- Error Boundary Component (Fängt Abstürze ab) ---
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -272,7 +269,7 @@ const generateLootItem = () => {
     return { ...item, obtainedAt: Date.now() }; 
 };
 
-// --- Firestore Pfade (Einfach) ---
+// --- Firestore Helper ---
 const getUserStatsDocRef = (db, userId) => doc(db, 'users', userId, 'stats', 'user_stats');
 const getTasksCollectionRef = (db, userId) => collection(db, 'users', userId, 'tasks');
 const getSelectionsDocRef = (db, userId) => doc(db, 'users', userId, 'sys', 'quest_selections');
@@ -296,6 +293,21 @@ const ErrorDisplay = ({ message }) => (
         <p className="text-sm text-red-400 mt-4">Tipp: Aktiviere in der Firebase Console unter Authentication "Anonym" und in Firestore Rules "allow read, write".</p>
     </div>
 );
+
+const NotificationToast = ({ notification }) => {
+    const { message, type, visible } = notification;
+    if (!visible) return null;
+    const bgColor = type === 'success' ? 'bg-green-500' : 'bg-red-500';
+    const Icon = type === 'success' ? CheckCircle : X;
+    return (
+        <div className="fixed top-4 right-4 z-50 animate-bounce">
+            <div className={`flex items-center ${bgColor} text-white text-sm font-bold px-6 py-4 rounded-xl shadow-2xl`}>
+                <Icon className="w-5 h-5 mr-3" />
+                <span>{message}</span>
+            </div>
+        </div>
+    );
+};
 
 const QuestTimer = ({ type }) => {
     const [timeLeft, setTimeLeft] = useState('');
@@ -350,7 +362,6 @@ const Sidebar = ({ currentView, setCurrentView, userId }) => {
 };
 
 const Header = ({ stats, levelStats, inventory }) => {
-    // Safely access props with defaults to prevent crashes during render if data is pending
     const safeStats = stats || { avatar: '👤', displayName: 'Held', lootBoxes: 0, level: 1, xp: 0, gold: 0 };
     const safeInventory = inventory || [];
     const safeLevelStats = levelStats || { progressPercentage: 0, xpToNextLevel: 100 };
@@ -685,8 +696,10 @@ const DashboardView = ({ db, userId, stats, levelStats, activeQuests, inventory,
     );
 };
 
-// --- APP COMPONENT ---
-function App() {
+// --- APP CONTAINER ---
+// Diese Komponente enthält die gesamte Logik der App, die zuvor in "App" war.
+// Sie wird unten von der neuen "App"-Wrapper-Komponente verwendet.
+function LifeGamifierContent() {
     const [authReady, setAuthReady] = useState(false);
     const [currentUserId, setCurrentUserId] = useState(null);
     const [dbInstance, setDbInstance] = useState(null);
@@ -700,14 +713,12 @@ function App() {
     const [notification, setNotification] = useState({ message: '', type: '', visible: false });
     const [allBosses, setAllBosses] = useState([]);
 
-    const levelStats = useMemo(() => calculateLevelProgress(userStats.xp), [userStats.xp]);
+    const levelStats = useMemo(() => calculateLevelProgress(userStats.xp || 0), [userStats.xp]);
     const showNotification = useCallback((m, t = 'success') => { setNotification({ message: m, type: t, visible: true }); setTimeout(() => setNotification(n => ({ ...n, visible: false })), 3000); }, []);
 
     useEffect(() => {
         if (!firebaseConfig.apiKey) { setLoading(false); return; }
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        // Wir nutzen die globale `app`, `auth`, `db` Instanzen, die oben definiert sind
         setDbInstance(db);
         const initAuth = async () => { 
             try { 
@@ -723,12 +734,13 @@ function App() {
 
     useEffect(() => {
         if (!authReady || !dbInstance || !currentUserId) return;
-        const db = dbInstance; const uid = currentUserId;
+        const uid = currentUserId;
         
         const handleError = (e) => {
             console.error("Firestore Error:", e);
             if (e.code === 'permission-denied') return;
-            setError("Datenbankverbindung fehlgeschlagen. Bitte prüfe deine Internetverbindung.");
+            // setError("Datenbankverbindung fehlgeschlagen. Bitte prüfe deine Internetverbindung.");
+            // Kein Blocking Error setzen, da manche Listener vllt. funktionieren
             setLoading(false);
         };
 
@@ -780,19 +792,25 @@ function App() {
 
     const activeQuests = useMemo(() => {
         const resolve = (ids, list, type) => {
+            // Sicherheitscheck: Falls ids undefined ist, leeres Array zurückgeben
             if (!ids) return [];
             return ids.map(id => {
                 const def = list.find(q => q.id === id); if (!def) return null;
                 const status = recurringCompletionMap[id];
                 const last = status?.lastCompleted;
                 let isComp = false;
-                if (type === 'daily') isComp = last && last.startsWith(questSelections.daily.date);
+                // Sicherheitscheck für questSelections
+                if (type === 'daily' && questSelections.daily?.date) isComp = last && last.startsWith(questSelections.daily.date);
                 else if (type === 'weekly') isComp = isCompletedThisWeek(last);
                 else if (type === 'monthly') isComp = isCompletedThisMonth(last);
                 return { ...def, type, isCompleted: isComp, completionDocId: status?.id, xpReward: getRewards(type, def.difficulty).xp };
             }).filter(Boolean);
         };
-        return [...resolve(questSelections.daily.ids, PREDEFINED_DAILY_QUESTS, 'daily'), ...resolve(questSelections.weekly.ids, PREDEFINED_WEEKLY_QUESTS, 'weekly'), ...resolve(questSelections.monthly.ids, PREDEFINED_MONTHLY_QUESTS, 'monthly')];
+        return [
+            ...resolve(questSelections.daily?.ids || [], PREDEFINED_DAILY_QUESTS, 'daily'), 
+            ...resolve(questSelections.weekly?.ids || [], PREDEFINED_WEEKLY_QUESTS, 'weekly'), 
+            ...resolve(questSelections.monthly?.ids || [], PREDEFINED_MONTHLY_QUESTS, 'monthly')
+        ];
     }, [questSelections, recurringCompletionMap]);
 
     const completeTask = useCallback(async (taskId, task) => {
@@ -874,13 +892,21 @@ function App() {
         <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row font-sans text-gray-800">
             <Sidebar currentView={currentView} setCurrentView={setCurrentView} userId={currentUserId} />
             <div className="flex-1 flex flex-col overflow-hidden relative">
-                <ErrorBoundary>
-                    <Header stats={userStats} levelStats={levelStats} inventory={inventory} />
-                    <main className="flex-1 overflow-y-auto bg-gray-50 scroll-smooth">{Content}</main>
-                </ErrorBoundary>
+                <Header stats={userStats} levelStats={levelStats} inventory={inventory} />
+                <main className="flex-1 overflow-y-auto bg-gray-50 scroll-smooth">{Content}</main>
             </div>
             <NotificationToast notification={notification} />
         </div>
+    );
+}
+
+// --- HAUPT APP WRAPPER (mit ErrorBoundary) ---
+// Diese Komponente ist der Einstiegspunkt, der sicherstellt, dass Fehler abgefangen werden
+function App() {
+    return (
+        <ErrorBoundary>
+            <LifeGamifierContent />
+        </ErrorBoundary>
     );
 }
 
