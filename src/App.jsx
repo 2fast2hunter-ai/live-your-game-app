@@ -11,7 +11,7 @@ import {
   Utensils, X, BarChart, Layers, Zap, 
   Hourglass, Lock, Flame, ShoppingBag, Gift, Sword, 
   Skull, Ghost, Sparkles, User, Save, Backpack, Box,
-  Frown, Meh, Smile, Star, AlertTriangle
+  Frown, Meh, Smile, Star, AlertTriangle, Clock // Clock hinzugefügt
 } from 'lucide-react';
 
 // --- DEINE FIREBASE KONFIGURATION ---
